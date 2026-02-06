@@ -38,7 +38,7 @@ jobs:
 
       - name: Build with Gradle
         run: |
-          ls -la gradlew
+          chmod +x ./gradlew
           ./gradlew --version
           ./gradlew build -x test
 

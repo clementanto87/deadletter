@@ -1,9 +1,12 @@
 # Build files
 build/
 .gradle/
-*.jar
 *.war
 *.class
+# Build JARs only (exclude Gradle wrapper JAR)
+!gradle/wrapper/gradle-wrapper.jar
+# App JARs
+build/libs/*.jar
 
 # IDE files
 .idea/

@@ -38,7 +38,8 @@ jobs:
 
       - name: Build with Gradle
         run: |
-          chmod +x gradlew
+          ls -la gradlew
+          ./gradlew --version
           ./gradlew build -x test
 
       - name: Set up Docker Buildx

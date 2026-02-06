@@ -1,0 +1,5 @@
+spring:
+  application:
+    name: deadletter
+server:
+  port: 8080

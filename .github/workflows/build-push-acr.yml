@@ -7,11 +7,9 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY_LOGIN_SERVER: ${{ secrets.AZURE_REGISTRY_LOGIN_SERVER }}
-  REGISTRY_USERNAME: ${{ secrets.AZURE_REGISTRY_USERNAME }}
-  REGISTRY_PASSWORD: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
   IMAGE_NAME: deadletter
   IMAGE_TAG: ${{ github.sha }}
+  ACR_LOGIN_SERVER: acrmyappdev.azurecr.io
 
 jobs:
   build-and-push:
@@ -41,12 +39,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Azure Container Registry
-        uses: docker/login-action@v3
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
         with:
-          registry: ${{ env.REGISTRY_LOGIN_SERVER }}
-          username: ${{ env.REGISTRY_USERNAME }}
-          password: ${{ env.REGISTRY_PASSWORD }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: |
+          AAD_TOKEN=$(az account get-access-token \
+            --resource https://containerregistry.azure.net \
+            --query accessToken -o tsv)
+
+          REFRESH_TOKEN=$(curl -s -X POST \
+            "https://${{ env.ACR_LOGIN_SERVER }}/oauth2/exchange" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "grant_type=access_token" \
+            -d "service=${{ env.ACR_LOGIN_SERVER }}" \
+            -d "access_token=$AAD_TOKEN" \
+            | jq -r '.refresh_token')
+
+          echo "$REFRESH_TOKEN" | docker login ${{ env.ACR_LOGIN_SERVER }} \
+            --username 00000000-0000-0000-0000-000000000000 \
+            --password-stdin
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -55,35 +71,29 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-            ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Deploy to Azure Container Apps
         uses: azure/container-apps-deploy-action@v2
         with:
-          containerAppName: deadletter-app
-          resourceGroup: deadletter-rg
-          imageToDeploy: ${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          containerAppName: myapp
+          resourceGroup: rg-myapp-dev
+          imageToDeploy: ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       - name: Logout from ACR
         if: always()
-        run: docker logout ${{ env.REGISTRY_LOGIN_SERVER }}
+        run: docker logout ${{ env.ACR_LOGIN_SERVER }}
 
-      - name: Create Release Artifact Info
+      - name: Summary
         run: |
-          echo "Image pushed successfully!"
-          echo "Registry: ${{ env.REGISTRY_LOGIN_SERVER }}"
-          echo "Repository: ${{ env.IMAGE_NAME }}"
-          echo "Tags: ${{ env.IMAGE_TAG }}, latest"
-          echo "Full Image URIs:"
-          echo "${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}"
-          echo "${{ env.REGISTRY_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest"
+          echo "## Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Registry | \`${{ env.ACR_LOGIN_SERVER }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image | \`${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Container App | myapp |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Resource Group | rg-myapp-dev |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Ref | ${{ github.ref_name }} |" >> "$GITHUB_STEP_SUMMARY"
